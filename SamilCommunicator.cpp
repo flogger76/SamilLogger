@@ -11,7 +11,8 @@ void SamilCommunicator::start()
 {
 	auto settings = settingsManager->GetSettings();
 	//create the software serial on the custom pins so we can use the hardware serial for debug comms.
-	samilSerial = new SoftwareSerial(settings->RS485Rx, settings->RS485Tx, false, BufferSize); // (RX, TX. inverted, buffer)
+  samilSerial = new SoftwareSerial(settings->RS485Rx, settings->RS485Tx, false); // (RX, TX. inverted, buffer)
+	//samilSerial = new SoftwareSerial(settings->RS485Rx, settings->RS485Tx, false, BufferSize); // (RX, TX. inverted, buffer)
 	//start the software serial
 	samilSerial->begin(9600); //inverter fixed baud rate
 
@@ -43,12 +44,15 @@ int SamilCommunicator::sendData(unsigned int address, char controlCode, char fun
 {
 	if (debugMode)
 		Serial.write("Sending data to inverter(s): ");
+
 	//send the header first
   headerBuffer[4] = address >> 8;
   headerBuffer[5] = address & 0xFF;
 	headerBuffer[6] = controlCode;
 	headerBuffer[7] = functionCode;
 	headerBuffer[8] = dataLength;
+  //yield();
+	delay(500);
 	samilSerial->write(headerBuffer, 9);
 	//check if we need to write the data part and send it.
 	if (dataLength)
@@ -116,7 +120,7 @@ void SamilCommunicator::checkOfflineInverters()
 				{
 					Serial.print("Marking inverter @ address: ");
 					Serial.print((short)inverters[index].address);
-					Serial.println("offline.");
+					Serial.println(" offline.");
 				}
 
 //				sendRemoveRegistration(inverters[index].address); //send in case the inverter thinks we are online
@@ -222,27 +226,36 @@ void SamilCommunicator::parseIncomingData(char incomingDataLength) //
 		return;
 	if (debugMode)
 		Serial.println("CRC match.");
-	
+  
 	//check the control code and function code to see what to do
-	if (inputBuffer[2] == 0x00 && inputBuffer[3] == 0x80)
-		handleRegistration(inputBuffer + 5, 16);
-	else if (inputBuffer[2] == 0x00 && inputBuffer[3] == 0x81)
-		handleRegistrationConfirmation(inputBuffer[0]);
-	else if (inputBuffer[2] == 0x01 && inputBuffer[3] == 0x81)
-		handleIncomingInformation(inputBuffer[0], inputBuffer[4], inputBuffer + 5);
+  if (inputBuffer[4] == 0x00 && inputBuffer[5] == 0x80) {
+    memcpy(serialBuffer, inputBuffer + 7, 10);
+    newInverter = true;
+  }
+  // register new inverter
+  else if (inputBuffer[1] == 0xFF && inputBuffer[6] == 0x01 && newInverter) {
+    newInverter = false;
+    handleRegistration(serialBuffer, 10);
+  }
+  else if (inputBuffer[4] == 0x00 && inputBuffer[5] == 0x81)
+    handleRegistrationConfirmation(inputBuffer[1]);
+  else if (inputBuffer[4] == 0x01 && inputBuffer[5] == 0x83)
+    handleInverterInformation(inputBuffer[1], inputBuffer[6], inputBuffer + 7);
+	else if (inputBuffer[4] == 0x01 && inputBuffer[5] == 0x82)
+		handleIncomingInformation(inputBuffer[1], inputBuffer[6], inputBuffer + 7);
 }
 
 void SamilCommunicator::handleRegistration(char * serialNumber, char length)
 {
 	//check if the serialnumber isn't listed yet. If it is use that one
 	//Add the serialnumber, generate an address and send it to the inverter
-	if (length != 16)
+  if (length != 10)
 		return;
 
 	for (char index = 0; index < inverters.size(); ++index)
 	{
 		//check inverter 
-		if (memcmp(inverters[index].serialNumber, serialNumber, 16) == 0)
+    if (memcmp(inverters[index].serialNumber, serialNumber, 10) == 0)
 		{
 			Serial.print("Already registered inverter reregistered with address: ");
 			Serial.println((short)inverters[index].address);
@@ -259,8 +272,8 @@ void SamilCommunicator::handleRegistration(char * serialNumber, char length)
 	newInverter.addressConfirmed = false;
 	newInverter.lastSeen = millis();
 	newInverter.isDTSeries = false; //TODO. Determine if DT series inverter by getting info
-	memset(newInverter.serialNumber, 0, 17);
-	memcpy(newInverter.serialNumber, serialNumber, 16);
+  memset(newInverter.serialNumber, 0, 11);
+  memcpy(newInverter.serialNumber, serialNumber, 10);
 	//get the new address. Add one (overflows at 255) and check if not in use
 	lastUsedAddress++;
 	while (getInverterInfoByAddress(lastUsedAddress) != nullptr)
@@ -304,7 +317,58 @@ void SamilCommunicator::handleRegistrationConfirmation(char address)
 		}
 	}
 	//get the information straight away
-	askInverterForInformation(address);
+	askInverterForType(address);
+}
+
+void SamilCommunicator::handleInverterInformation(char address, char dataLength, char * data)
+{
+  
+  auto inverter = getInverterInfoByAddress(address);
+  if (inverter == nullptr) return;
+
+  if (dataLength < 44) //minimum for non dt series
+    return;
+
+  Serial.println("Inverter data: "); 
+  
+  if (data[0] == 0x32)
+  {
+    inverter->isDTSeries = true;
+    Serial.println("3-phase inverter");
+  }
+  else
+  {
+    inverter->isDTSeries = false;
+    Serial.println("1-phase inverter");
+  }
+    
+  Serial.print("Apparent power [VA]: ");
+  for (int i = 1; i < 7; i++)
+    Serial.print(data[i]);
+  Serial.println("");
+  
+  Serial.print("HMI MCU SW: ");
+  for (int i = 7; i < 12; i++)
+    Serial.print(data[i]);
+  Serial.println("");
+
+  Serial.print("Model name: ");
+  for (int i = 12; i < 28; i++)
+    Serial.print(data[i]);
+  Serial.println("");  
+
+  Serial.print("Manufacturer: ");
+  for (int i = 28; i < 44; i++)
+    Serial.print(data[i]);
+  Serial.println("");
+
+  Serial.print("Serial number: ");
+  for (int i = 44; i < 60; i++)
+    Serial.print(data[i]);
+  Serial.println("");
+
+  askInverterForInformation(address);
+     
 }
 
 void SamilCommunicator::handleIncomingInformation(char address, char dataLength, char * data)
@@ -320,35 +384,98 @@ void SamilCommunicator::handleIncomingInformation(char address, char dataLength,
 	//data from iniverter, means online
 	inverter->lastSeen = millis();
 	char dtPtr = 0;
-	inverter->vpv1 = bytesToFloat(data, 10);					dtPtr += 2;
-	inverter->vpv2 = bytesToFloat(data+ dtPtr, 10);				dtPtr += 2;
-	inverter->ipv1 = bytesToFloat(data + dtPtr, 10);			dtPtr += 2;
-	inverter->ipv2 = bytesToFloat(data + dtPtr, 10);			dtPtr += 2;
-	inverter->vac1 = bytesToFloat(data + dtPtr, 10);			dtPtr += 2;
-	if (inverter->isDTSeries)
-	{
-		inverter->vac2 = bytesToFloat(data + dtPtr, 10);		dtPtr += 2;
-		inverter->vac3 = bytesToFloat(data + dtPtr, 10);		dtPtr += 2;
-	}
-	inverter->iac1 = bytesToFloat(data + dtPtr, 10);			dtPtr += 2;
-	if (inverter->isDTSeries)
-	{
-		inverter->iac2 = bytesToFloat(data + dtPtr, 10);		dtPtr += 2;
-		inverter->iac3 = bytesToFloat(data + dtPtr, 10);		dtPtr += 2;
-	}
-	inverter->fac1 = bytesToFloat(data + dtPtr, 100);			dtPtr += 2;
-	if (inverter->isDTSeries)
-	{
-		inverter->fac2 = bytesToFloat(data + dtPtr, 100);		dtPtr += 2;
-		inverter->fac3 = bytesToFloat(data + dtPtr, 100);		dtPtr += 2;
-	}
-	inverter->pac = ((unsigned short)(data[dtPtr]) << 8) | (data[dtPtr +1]);			dtPtr += 2;
-	inverter->workMode = ((unsigned short)(data[dtPtr]) << 8) | (data[dtPtr + 1]);	dtPtr += 2;
-	//TODO: Get the other values too
-	inverter->temp = bytesToFloat(data + dtPtr, 10);		dtPtr += inverter->isDTSeries ? 34 : 26;
-	inverter->eDay = bytesToFloat(data + dtPtr, 10);		
+  
+  inverter->temp = bytesToFloat(data, 10);                                         dtPtr += 2;
+  inverter->vpv1 = bytesToFloat(data + dtPtr, 10);                                dtPtr += 2;
+  inverter->vpv2 = bytesToFloat(data + dtPtr, 10);                                dtPtr += 2;
+  inverter->ipv1 = bytesToFloat(data + dtPtr, 10);                                dtPtr += 2;
+  inverter->ipv2 = bytesToFloat(data + dtPtr, 10);                                dtPtr += 2;
+  inverter->eTotal_msw = ((unsigned short)(data[dtPtr]) << 8) | (data[dtPtr +1]); dtPtr += 2;
+  inverter->eTotal_lsw = ((unsigned short)(data[dtPtr]) << 8) | (data[dtPtr +1]); dtPtr += 2;
+  inverter->hTotal_msw = ((unsigned short)(data[dtPtr]) << 8) | (data[dtPtr +1]); dtPtr += 2;
+  inverter->hTotal_lsw = ((unsigned short)(data[dtPtr]) << 8) | (data[dtPtr +1]); dtPtr += 2;
+  inverter->pac = ((unsigned short)(data[dtPtr]) << 8) | (data[dtPtr +1]);        dtPtr += 2;
+  inverter->workMode = ((unsigned short)(data[dtPtr]) << 8) | (data[dtPtr + 1]);  dtPtr += 2;
+  inverter->eDay = bytesToFloat(data + dtPtr, 100);                               dtPtr += 26;
+  inverter->pdc1 = ((unsigned short)(data[dtPtr]) << 8) | (data[dtPtr +1]);       dtPtr += 2;
+  inverter->pdc2 = ((unsigned short)(data[dtPtr]) << 8) | (data[dtPtr +1]);       dtPtr += 2;
+  inverter->sinkTemp = bytesToFloat(data + dtPtr, 10);                            dtPtr += 2;
+  inverter->iac1 = bytesToFloat(data + dtPtr, 10);                                dtPtr += 2;
+  inverter->vac1 = bytesToFloat(data + dtPtr, 10);                                dtPtr += 2;
+  inverter->fac1 = bytesToFloat(data + dtPtr, 100);                               dtPtr += 2;
+  if (inverter->isDTSeries)
+  {
+    inverter->iac2 = bytesToFloat(data + dtPtr, 10);                              dtPtr += 2;
+    inverter->vac2 = bytesToFloat(data + dtPtr, 10);                              dtPtr += 2;
+    inverter->fac2 = bytesToFloat(data + dtPtr, 100);                             dtPtr += 2;
+    inverter->iac3 = bytesToFloat(data + dtPtr, 10);                              dtPtr += 2;
+    inverter->vac3 = bytesToFloat(data + dtPtr, 10);                              dtPtr += 2;
+    inverter->fac3 = bytesToFloat(data + dtPtr, 100);                             dtPtr += 2;
+    
+  }
+  inverter->eTotal = ((float)(((unsigned long)inverter->eTotal_msw << 16) | inverter->eTotal_lsw)) / 10 ;
+  inverter->hTotal = ((unsigned long)inverter->hTotal_msw << 16) | inverter->hTotal_lsw;
+  
 	//isonline is set after first batch of data is set so readers get actual data 
 	inverter->isOnline = true;
+  inverter->cnt++;
+  if (inverter->cnt >= 20)
+  {
+    Serial.println("PV data:");
+    Serial.print("Internal temperature [\xDF""C]: ");
+    Serial.println(inverter->temp);
+    Serial.print("PV 1 voltage [V]: ");
+    Serial.println(inverter->vpv1);
+    Serial.print("PV 2 voltage [V]: ");
+    Serial.println(inverter->vpv2);
+    Serial.print("PV 1 current [A]: ");
+    Serial.println(inverter->ipv1);
+    Serial.print("PV 2 current [A]: ");
+    Serial.println(inverter->ipv2);
+    /*
+    Serial.println(inverter->eTotal_msw);
+    Serial.println(inverter->eTotal_lsw);
+    Serial.println(inverter->hTotal_msw);
+    Serial.println(inverter->hTotal_lsw);
+    */
+    Serial.print("Inverter operation mode (0=wait, 1=normal, 2=fault, 3=permanent fault, 4=check, 5=PV power off): ");
+    Serial.println(inverter->workMode);
+    Serial.print("Output power AC [W]: ");
+    Serial.println(inverter->pac);
+    Serial.print("Day energy prod. [kWh]: ");
+    Serial.println(inverter->eDay);
+    Serial.print("PV 1 power [W]: ");
+    Serial.println(inverter->pdc1);
+    Serial.print("PV 2 power [W]: ");
+    Serial.println(inverter->pdc2);
+    Serial.print("Heat sink temperature [\xDF""C]: ");
+    Serial.println(inverter->sinkTemp);
+    Serial.print("AC phase 1 current [A]: ");
+    Serial.println(inverter->iac1);
+    Serial.print("AC phase 1 voltage [V]: ");
+    Serial.println(inverter->vac1);
+    Serial.print("AC phase 1 frequency [Hz]: ");
+    Serial.println(inverter->fac1);
+    Serial.print("AC phase 2 current [A]: ");
+    Serial.println(inverter->iac2);
+    Serial.print("AC phase 2 voltage [V]: ");
+    Serial.println(inverter->vac2);
+    Serial.print("AC phase 2 frequency [Hz]: ");
+    Serial.println(inverter->fac2);
+    Serial.print("AC phase 3 current [A]: ");
+    Serial.println(inverter->iac3);
+    Serial.print("AC phase 3 voltage [V]: ");
+    Serial.println(inverter->vac3);
+    Serial.print("AC phase 3 frequency [Hz]: ");
+    Serial.println(inverter->fac3);
+    Serial.print("Energy total [kWh]: ");
+    Serial.println(inverter->eTotal);
+    Serial.print("Total operation time [h]: ");
+    Serial.println(inverter->hTotal);
+    inverter->cnt = 0;
+  }
+  
+  
 }
 
 float SamilCommunicator::bytesToFloat(char * bt, char factor)
@@ -379,9 +506,14 @@ void SamilCommunicator::askAllInvertersForInformation()
 	}
 }
 
+void SamilCommunicator::askInverterForType(char address)
+{
+  sendData(address, 0x01, 0x03, 0, nullptr);
+}
+
 void SamilCommunicator::askInverterForInformation(char address)
 {
-	sendData(address, 0x00, 0x00, 0, nullptr);
+	sendData(address, 0x01, 0x02, 0, nullptr);
 }
 
 SamilCommunicator::SamilInverterInformation *  SamilCommunicator::getInverterInfoByAddress(char address)
@@ -404,11 +536,12 @@ void SamilCommunicator::sendAllocateRegisterAddress(char * serialNumber, char ad
 	}
 
 	//create our registrationpacket with serialnumber and address and send it over
-	char RegisterData[17];
-	memcpy(RegisterData, serialNumber, 16);
-	RegisterData[16] = address;
+	char RegisterData[11];
+	//memcpy(RegisterData, serialNumber, 16);
+  memcpy(RegisterData, serialNumber, 10);
+  RegisterData[10] = address;
 	//need to send alloc msg
-	sendData(0x00, 0x01, 0x01, 17, RegisterData);
+	sendData(0x00, 0x00, 0x01, 11, RegisterData);
 }
 
 //void SamilCommunicator::sendRemoveRegistration(char address)

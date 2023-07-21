@@ -1,3 +1,21 @@
+# This is a fork of https://github.com/vk2tds/SamilLogger
+The code has been changed to cooperate with SolarLake TL-PM series inverters.
+The Application has been tested with SL 10000TL-PM inverter/
+Example of communication with the inverter:
+
+55 AA 00 00 00 00 00 00 00 00 FF - Software -> Inverter   Request Serial Number from any inverter without an address
+55 AA 00 00 00 00 00 80 0A 54 30 34 31 34 34 59 30 39 37 03 D3 - Inverter -> Software   Provides a serial number to the Software
+55 AA 00 FF 00 00 00 00 01 15 02 14 - Inverter -> Software   Second answer from inverter ???
+55 AA 00 00 00 00 00 01 0B 54 30 34 31 34 34 59 30 39 37 01 03 56 - Software -> Inverter   Request Logs into the inverter when followed by the Serial Number in the Data field
+55 AA 00 01 00 00 00 81 01 06 01 88 - Inverter -> Software  Inverter allocates itself an address and replies
+55 aa 00 00 00 01 01 03 00 01 04 - Software -> Inverter  Request software version and inverter specifications
+55 aa 00 01 00 00 01 83 3c 32 20 31 30 30 30 30 56 32 2e 36 31 53 4c 20 20 31 30 30 30 30 54 4c 2d 50 4d 20 20 53 61 6d 69 6c 50 6f 77 65 72 00 20 20 20 20 20 54 30 34 31 34 34 59 30 39 37 00 00 00 00 00 00 0e 87 - Inverter -> Software  Supply inverter software version and inverter specifications
+55 aa 00 00 00 01 01 02 00 01 03 - Software -> Inverter  Request PV data
+55 aa 00 01 00 00 01 82 48 02 30 0f 3e 08 ff 00 13 00 12 00 00 9d d5 00 00 08 20 04 57 00 01 12 18 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 02 ec 01 a6 02 26 00 12 09 6b 13 85 00 11 09 78 13 85 00 12 09 34 13 85 0a 82 - Inverter -> Software   PV Data
+
+
+
+
 # Samil SolarRiver Inverter Logger based on ESP8266
 
 This ESP8266 firmware enables you to read information from a Samil solar inverter through it's RS485 bus.

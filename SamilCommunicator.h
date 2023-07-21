@@ -23,7 +23,9 @@ public:
 		bool isOnline;				//is the inverter online (see above)
 		bool isDTSeries;			//is tri phase inverter (get phase 2, 3 info)
 
+
 		//inverert info from inverter pdf. Updated by the inverter info command
+		float temp = 0.0;
 		float vpv1=0.0;
 		float vpv2=0.0;
 		float ipv1=0.0;
@@ -38,11 +40,18 @@ public:
 		float fac2 = 0.0;
 		float fac3 = 0.0;
 		short pac=0;
+    short pdc1=0;
+    short pdc2=0;
 		short workMode=0;
-		float temp = 0.0;
+		float sinkTemp = 0.0;
 		int errorMessage=0;
-		int eTotal=0;
-		int hTotal=0;
+		float eTotal=0;
+    unsigned short eTotal_lsw=0;
+    unsigned short eTotal_msw=0;
+		unsigned long hTotal=0;
+		unsigned short hTotal_lsw=0;
+    unsigned short hTotal_msw=0;
+    /* not used
 		float tempFault = 0.0;
 		float pv1Fault = 0.0;
 		float pv2Fault = 0.0;
@@ -53,7 +62,9 @@ public:
 		float line2FFault = 0.0;
 		float line3FFault = 0.0;
 		short gcfiFault=0;
+		*/
 		float eDay = 0.0;
+    int cnt = 0;
 	};
 
 	SamilCommunicator(SettingsManager * settingsManager, bool debugMode = false);
@@ -74,6 +85,10 @@ private:
 	char headerBuffer[7];
 	char inputBuffer[BufferSize];
 	char outputBuffer[BufferSize];
+
+  //dodane
+  char serialBuffer[10];
+  bool newInverter;
 
 	bool debugMode;
 
@@ -97,6 +112,8 @@ private:
 	void parseIncomingData(char dataLength);
 	void handleRegistration(char * serialNumber, char length);
 	void handleRegistrationConfirmation(char address);
+  void askInverterForType(char address);
+  void handleInverterInformation(char address, char dataLengthh, char * data);
 	void handleIncomingInformation(char address, char dataLengthh, char * data);
 	float bytesToFloat(char * bt, char factor);
 	void askAllInvertersForInformation();

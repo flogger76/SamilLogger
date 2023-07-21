@@ -50,6 +50,8 @@ void setup()
 	Serial.println("Booting");
 	WiFi.mode(WIFI_STA);
 	WiFi.hostname(settings->wifiHostname.c_str());
+  WiFi.disconnect();
+  delay(500);
 	WiFi.begin(settings->wifiSSID.c_str(), settings->wifiPassword.c_str());
 
 	Serial.print("Connecting to WiFi");
@@ -59,6 +61,8 @@ void setup()
 	}
 	Serial.println("");
 	Serial.println("Connected!");
+  WiFi.setAutoReconnect(true);
+  WiFi.persistent(true);
 
 	timeClient.begin();
 
