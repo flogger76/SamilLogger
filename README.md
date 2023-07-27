@@ -1,4 +1,7 @@
-# This is a fork of https://github.com/vk2tds/SamilLogger
+# SamilLogger for Samil SolarLake inverters
+
+This is a fork of https://github.com/vk2tds/SamilLogger
+
 The code has been changed to cooperate with SolarLake TL-PM series inverters.
 The Application has been tested with SL 10000TL-PM inverter/
 Example of communication with the inverter:
